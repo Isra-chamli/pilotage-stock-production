@@ -15,42 +15,63 @@ appliquer_style()
 st.title("Analyse des fournisseurs")
 
 # Chargement des données
-fournisseurs = charger_excel("data/fournisseurs.xlsx", "Fournisseurs")
-historique = charger_excel("data/historique_fournisseurs.xlsx", "Historique fournisseurs")
+historique = charger_excel("data/historique_commandes.xlsx", "Historique commandes")
 
 # ============================================
-# Synthèse par fournisseur (déjà calculée dans fournisseurs.xlsx)
+# Recalcul du score de fiabilité depuis l'historique réel
+# Score basé sur la RÉGULARITÉ des délais (écart-type)
+# Un fournisseur régulier (même délai à chaque fois) = fiable
+# Un fournisseur imprévisible (délais très variables) = peu fiable
 # ============================================
-synthese = fournisseurs.copy()
+def calculer_score_fiabilite(groupe):
+    """
+    Score = max(0, 100 - (ecart_type / delai_moyen * 100))
+    - Si écart_type = 0 (toujours le même délai) → score = 100%
+    - Plus le délai varie, plus le score baisse
+    """
+    delai_moyen = groupe["delai_moyen_jours"].mean()
+    ecart_type = groupe["delai_moyen_jours"].std()
 
+    if delai_moyen == 0 or pd.isna(ecart_type):
+        return 100  # un seul enregistrement = on lui accorde le bénéfice du doute
+
+    coefficient_variation = ecart_type / delai_moyen
+    score = max(0, 100 - (coefficient_variation * 100))
+    return round(score, 0)
+
+synthese = historique.groupby(
+    ["nom_fournisseur", "Pays", "origine"]
+).apply(
+    lambda g: pd.Series({
+        "nb_commandes": len(g),
+        "delai_moyen_jours": round(g["delai_moyen_jours"].mean(), 0),
+        "score_fiabilite": calculer_score_fiabilite(g),
+    })
+).reset_index()
 
 def determiner_risque_fournisseur(score):
-    if score >= 90:
-        return "🟢 Faible"
-    elif score >= 70:
-        return "🟡 Moyen"
-    elif score >= 50:
-        return "🟠 Élevé"
+    if score >= 80:
+        return "🟢 Fiable"
+    elif score >= 60:
+        return "🟡 Assez fiable"
+    elif score >= 40:
+        return "🟠 Peu fiable"
     else:
-        return "🔴 Très élevé"
-
+        return "🔴 Très peu fiable"
 
 synthese["risque"] = synthese["score_fiabilite"].apply(determiner_risque_fournisseur)
+synthese = synthese.sort_values("score_fiabilite", ascending=False)
 
 st.write("### Synthèse par fournisseur")
-
-colonnes_dispo = [c for c in [
-    "nom_fournisseur", "pays", "origine", "nb_commandes_historique",
-    "delai_moyen_jours", "score_fiabilite", "risque",
-] if c in synthese.columns]
+st.caption("Score de fiabilité basé sur la régularité des délais de livraison (écart-type). Plus le délai est constant, plus le fournisseur est fiable.")
 
 st.dataframe(
-    synthese[colonnes_dispo],
+    synthese,
     column_config={
         "nom_fournisseur": "Fournisseur",
-        "pays": "Pays",
+        "Pays": "Pays",
         "origine": "Origine",
-        "nb_commandes_historique": "Nb commandes",
+        "nb_commandes": "Nb commandes",
         "delai_moyen_jours": st.column_config.NumberColumn(
             "Délai moyen (jours)", format="%.0f j"
         ),
@@ -65,22 +86,20 @@ st.dataframe(
 st.divider()
 
 # ============================================
-# Graphique : évolution mensuelle du taux de livraison à temps
-# calculé directement depuis l'historique réel des commandes
+# Graphique : évolution du délai moyen par mois
 # ============================================
-st.write("### Évolution du taux de livraison à temps (par mois)")
+st.write("### Évolution du délai moyen de livraison (par mois)")
 
-# On ne garde que les commandes avec une date de réception connue
 historique_valide = historique.dropna(subset=["date_reception"]).copy()
 
-if len(historique_valide) == 0 or "dans_les_delais" not in historique_valide.columns:
-    st.info("Pas assez de données historiques datées pour tracer une évolution.")
+if len(historique_valide) == 0:
+    st.info("Pas assez de données historiques pour tracer une évolution.")
 else:
     historique_valide["mois"] = pd.to_datetime(
-        historique_valide["date_reception"]
+        historique_valide["date_reception"], errors="coerce"
     ).dt.strftime("%Y-%m")
 
-    # On ne garde que les fournisseurs les plus actifs pour un graphique lisible
+    # 6 fournisseurs les plus actifs
     top_fournisseurs = (
         historique_valide["nom_fournisseur"].value_counts().head(6).index.tolist()
     )
@@ -88,26 +107,22 @@ else:
         historique_valide["nom_fournisseur"].isin(top_fournisseurs)
     ]
 
-    # Taux de livraison à temps = moyenne de dans_les_delais (True/False -> 1/0), en %
     evolution = (
-        historique_top.groupby(["mois", "nom_fournisseur"])["dans_les_delais"]
+        historique_top.groupby(["mois", "nom_fournisseur"])["delai_moyen_jours"]
         .mean()
         .reset_index()
     )
-    evolution["taux_pourcent"] = evolution["dans_les_delais"] * 100
 
     evolution_pivot = evolution.pivot(
-        index="mois", columns="nom_fournisseur", values="taux_pourcent"
+        index="mois", columns="nom_fournisseur", values="delai_moyen_jours"
     ).sort_index()
 
-    st.caption("Affiché pour les 6 fournisseurs les plus actifs (par nombre de commandes).")
+    st.caption("Délai moyen en jours pour les 6 fournisseurs les plus actifs. Une courbe qui monte = délais qui s'allongent.")
     st.line_chart(evolution_pivot)
 
 st.divider()
 st.write("### Historique détaillé des commandes")
 
-# On nettoie les colonnes de dates avant affichage : Streamlit/Arrow
-# n'accepte pas une colonne qui mélange dates et texte/valeurs vides.
 historique_affichage = historique.copy()
 for colonne_date in ["date_demande", "date_reception"]:
     if colonne_date in historique_affichage.columns:
