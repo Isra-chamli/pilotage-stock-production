@@ -15,7 +15,7 @@ appliquer_style()
 st.title("Analyse des fournisseurs")
 
 # Chargement des données
-historique = charger_excel("data/historique_commandes.xlsx", "Historique commandes")
+historique = charger_excel("data/historique_fournisseurs.xlsx", "Historique fournisseurs")
 
 # ============================================
 # Recalcul du score de fiabilité depuis l'historique réel
