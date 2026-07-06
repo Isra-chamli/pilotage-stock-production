@@ -18,25 +18,28 @@ st.title("Analyse des fournisseurs")
 historique = charger_excel("data/historique_fournisseurs.xlsx", "Historique fournisseurs")
 
 # ============================================
-# Recalcul du score de fiabilité depuis l'historique réel
-# Score basé sur la RÉGULARITÉ des délais (écart-type)
-# Un fournisseur régulier (même délai à chaque fois) = fiable
-# Un fournisseur imprévisible (délais très variables) = peu fiable
+# Délais standards par origine
+# (basés sur les normes industrielles pour une usine tunisienne)
 # ============================================
-def calculer_score_fiabilite(groupe):
-    """
-    Score = max(0, 100 - (ecart_type / delai_moyen * 100))
-    - Si écart_type = 0 (toujours le même délai) → score = 100%
-    - Plus le délai varie, plus le score baisse
-    """
-    delai_moyen = groupe["delai_moyen_jours"].mean()
-    ecart_type = groupe["delai_moyen_jours"].std()
+DELAIS_STANDARDS = {
+    "local": 30,      # fournisseur tunisien : délai acceptable = 30 jours
+    "étranger": 60,   # fournisseur européen : délai acceptable = 60 jours
+}
 
-    if delai_moyen == 0 or pd.isna(ecart_type):
-        return 100  # un seul enregistrement = on lui accorde le bénéfice du doute
+def calculer_score_fournisseur(groupe):
+    """
+    Score basé sur la performance réelle vs délai standard attendu.
+    score = max(0, (delai_standard - delai_reel) / delai_standard * 100)
+    - Fournisseur livre avant le délai standard → score élevé
+    - Fournisseur livre exactement au délai standard → score moyen
+    - Fournisseur livre après le délai standard → score bas ou 0
+    """
+    origine = groupe["origine"].iloc[0]
+    delai_standard = DELAIS_STANDARDS.get(origine, 45)
+    delai_reel_moyen = groupe["delai_moyen_jours"].mean()
 
-    coefficient_variation = ecart_type / delai_moyen
-    score = max(0, 100 - (coefficient_variation * 100))
+    score = ((delai_standard - delai_reel_moyen) / delai_standard) * 100
+    score = max(0, min(100, score))
     return round(score, 0)
 
 synthese = historique.groupby(
@@ -45,25 +48,26 @@ synthese = historique.groupby(
     lambda g: pd.Series({
         "nb_commandes": len(g),
         "delai_moyen_jours": round(g["delai_moyen_jours"].mean(), 0),
-        "score_fiabilite": calculer_score_fiabilite(g),
+        "delai_standard_jours": DELAIS_STANDARDS.get(g["origine"].iloc[0], 45),
+        "score_fiabilite": calculer_score_fournisseur(g),
     })
 ).reset_index()
 
 def determiner_risque_fournisseur(score):
-    if score >= 80:
+    if score >= 75:
         return "🟢 Fiable"
-    elif score >= 60:
-        return "🟡 Assez fiable"
-    elif score >= 40:
-        return "🟠 Peu fiable"
+    elif score >= 50:
+        return "🟡 Acceptable"
+    elif score >= 25:
+        return "🟠 Lent"
     else:
-        return "🔴 Très peu fiable"
+        return "🔴 Très lent"
 
 synthese["risque"] = synthese["score_fiabilite"].apply(determiner_risque_fournisseur)
 synthese = synthese.sort_values("score_fiabilite", ascending=False)
 
 st.write("### Synthèse par fournisseur")
-st.caption("Score de fiabilité basé sur la régularité des délais de livraison (écart-type). Plus le délai est constant, plus le fournisseur est fiable.")
+st.caption("Score basé sur le délai réel vs délai standard attendu (30j fournisseurs locaux / 60j fournisseurs étrangers). Score 100% = livraison bien avant le délai standard.")
 
 st.dataframe(
     synthese,
@@ -73,7 +77,10 @@ st.dataframe(
         "origine": "Origine",
         "nb_commandes": "Nb commandes",
         "delai_moyen_jours": st.column_config.NumberColumn(
-            "Délai moyen (jours)", format="%.0f j"
+            "Délai réel moyen", format="%.0f j"
+        ),
+        "delai_standard_jours": st.column_config.NumberColumn(
+            "Délai standard", format="%.0f j"
         ),
         "score_fiabilite": st.column_config.ProgressColumn(
             "Score fiabilité", min_value=0, max_value=100, format="%.0f%%"
@@ -99,7 +106,6 @@ else:
         historique_valide["date_reception"], errors="coerce"
     ).dt.strftime("%Y-%m")
 
-    # 6 fournisseurs les plus actifs
     top_fournisseurs = (
         historique_valide["nom_fournisseur"].value_counts().head(6).index.tolist()
     )
