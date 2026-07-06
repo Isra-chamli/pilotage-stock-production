@@ -25,8 +25,24 @@ try:
 except Exception:
     consommation = pd.DataFrame(columns=["code_matiere", "conso_moyenne_jour"])
 
+# ============================================
+# Hypothèse de couverture (car pas de conso réelle)
+# ============================================
+st.info(
+    "⚠️ Aucun historique réel de consommation n'est disponible. "
+    "Le nombre de jours restants est **estimé** en supposant que le stock "
+    "de sécurité couvre un nombre de jours fixe, réglable ci-dessous. "
+    "Dès qu'une vraie consommation sera renseignée dans `consommation.xlsx`, "
+    "le calcul basculera automatiquement sur des données réelles."
+)
+
+delai_couverture = st.slider(
+    "Délai de couverture supposé du stock de sécurité (jours)",
+    min_value=5, max_value=45, value=15, step=1,
+)
+
 # Calcul du risque
-resultats = calculer_risque(matieres, consommation, fournisseurs)
+resultats = calculer_risque(matieres, consommation, fournisseurs, delai_couverture_securite=delai_couverture)
 
 # On ne garde que les matières à risque
 alertes = resultats[resultats["niveau_risque"] != "🟢 Normal"].copy()
@@ -43,8 +59,8 @@ def matiere_a_encore_une_demande_active(code_matiere):
 alertes["a_une_demande_active"] = alertes["code_matiere"].apply(matiere_a_encore_une_demande_active)
 alertes = alertes[alertes["a_une_demande_active"]]
 
-# Tri par ratio_stock (le plus critique en premier)
-alertes = alertes.sort_values("ratio_stock")
+# Tri par jours restants (le plus critique en premier)
+alertes = alertes.sort_values("couverture_jours")
 
 if len(alertes) == 0:
     st.success("Aucune alerte actuelle. Toutes les matières sont à un niveau normal, ou leurs demandes ont déjà été traitées.")
@@ -53,7 +69,7 @@ else:
     # KPIs de synthèse
     # ============================================
     nb_alertes = len(alertes)
-    ratio_min = alertes["ratio_stock"].min()
+    jours_min = alertes["couverture_jours"].min()
     quantite_totale_a_commander = alertes["quantite_a_commander"].sum()
 
     col1, col2, col3 = st.columns(3)
@@ -63,6 +79,10 @@ else:
             st.metric("🚨 Matières en alerte", nb_alertes)
 
     with col2:
+        with st.container(border=True):
+            st.metric("⏳ Jours restants (min.)", f"{jours_min:.0f} j")
+
+    with col3:
         with st.container(border=True):
             st.metric("📦 Quantité totale à commander", f"{quantite_totale_a_commander:.0f}")
 
@@ -80,15 +100,4 @@ else:
                 st.write(f"Quantité à commander : **{ligne['quantite_a_commander']:.0f}**")
 
             with col2:
-                ratio = ligne["ratio_stock"]
-                st.write(f"Stock actuel : {ligne['stock_actuel']:.0f}")
-                st.write(f"Seuil de sécurité : {ligne['stock_securite']:.0f}")
-                st.write(f"Ratio stock : {ratio*100:.0f}% du seuil")
-
-    st.divider()
-    st.write("### Vue tableau complète")
-    colonnes_a_masquer = ["a_une_demande_active", "couverture_jours", 
-                       "conso_moyenne_jour", "nom_fournisseur"]
-colonnes_affichees = [c for c in alertes.columns 
-                      if c not in colonnes_a_masquer]
-st.dataframe(alertes[colonnes_affichees])
+                st.write(f"Stock actuel : {ligne

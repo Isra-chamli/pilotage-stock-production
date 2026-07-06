@@ -1,8 +1,9 @@
 """
 Logique métier : calcul du risque de rupture de stock
 Adapté aux vraies données Maklada :
-- Pas de consommation historique disponible pour l'instant
-  → risque calculé sur le ratio stock_actuel / stock_securite
+- Pas de consommation historique disponible
+  → consommation journalière ESTIMÉE à partir du stock de sécurité,
+    en supposant qu'il couvre un nombre de jours donné (paramétrable)
 - Pas de liaison code_matiere dans le fichier fournisseurs
   → délai moyen global calculé depuis l'historique des commandes
 """
@@ -10,49 +11,54 @@ Adapté aux vraies données Maklada :
 import pandas as pd
 
 
-def calculer_risque(matieres, consommation, fournisseurs):
+def calculer_risque(matieres, consommation, fournisseurs, delai_couverture_securite=15):
     """
     Calcule le niveau de risque de rupture pour chaque matière.
-    
-    Mode actuel (sans consommation historique) :
-    - Risque basé sur le ratio stock_actuel / stock_securite
-    - Délai fournisseur = délai moyen global de tous les fournisseurs
-    
-    Évolution future (quand consommation disponible) :
-    - Ajouter conso_moyenne_jour dans matieres.xlsx
-    - La logique bascule automatiquement en mode "couverture en jours"
+
+    delai_couverture_securite : hypothèse (en jours) sur le nombre de jours
+    que le stock de sécurité est censé couvrir. Sert à estimer une
+    consommation journalière en l'absence d'historique réel.
+
+    Évolution future (quand une vraie consommation sera disponible) :
+    - Remplir conso_moyenne_jour dans consommation.xlsx avec des valeurs > 0
+    - La fonction utilisera automatiquement ces vraies valeurs à la place
+      de l'estimation.
     """
 
-    # On travaille directement sur les matières
     df = matieres.copy()
 
     # ============================================
-    # Étape 1 : consommation moyenne
-    # Si la colonne existe et contient des valeurs > 0, on l'utilise
-    # Sinon, on reste en mode "ratio de stock"
+    # Étape 1 : consommation moyenne journalière
+    # Priorité à une vraie consommation si elle existe et est renseignée,
+    # sinon on ESTIME à partir du stock de sécurité
     # ============================================
-    if "conso_moyenne_jour" not in df.columns:
-        df["conso_moyenne_jour"] = 0
-    else:
+    if "conso_moyenne_jour" in df.columns and (df["conso_moyenne_jour"].fillna(0) > 0).any():
         df["conso_moyenne_jour"] = df["conso_moyenne_jour"].fillna(0)
+        df["conso_est_estimee"] = df["conso_moyenne_jour"] == 0
+    else:
+        # Estimation : le stock de sécurité couvre X jours de consommation
+        df["conso_moyenne_jour"] = df["stock_securite"] / delai_couverture_securite
+        # Évite une division par zéro si stock_securite = 0
+        df["conso_moyenne_jour"] = df["conso_moyenne_jour"].replace(0, 0.01)
+        df["conso_est_estimee"] = True
 
     # ============================================
     # Étape 2 : délai fournisseur
-    # On calcule le délai moyen global depuis le fichier fournisseurs
-    # (pas de liaison par code_matiere dans les vraies données)
     # ============================================
     if "delai_moyen_jours" in fournisseurs.columns and len(fournisseurs) > 0:
         delai_global = fournisseurs["delai_moyen_jours"].mean()
     else:
-        delai_global = 30  # valeur par défaut prudente si pas de données
+        delai_global = 30
 
     df["delai_moyen_jours"] = delai_global
     df["nom_fournisseur"] = "Voir fichier fournisseurs"
 
     # ============================================
-    # Étape 3 : calcul du ratio de stock et couverture
+    # Étape 3 : couverture en jours (= jours restants estimés)
     # ============================================
-    # Ratio stock actuel / stock de sécurité
+    df["couverture_jours"] = (df["stock_actuel"] / df["conso_moyenne_jour"]).round(1)
+
+    # Ratio stock conservé uniquement pour information / tri secondaire
     df["ratio_stock"] = df.apply(
         lambda ligne: ligne["stock_actuel"] / ligne["stock_securite"]
         if ligne["stock_securite"] > 0
@@ -60,36 +66,16 @@ def calculer_risque(matieres, consommation, fournisseurs):
         axis=1
     )
 
-    # Couverture en jours (disponible seulement si conso > 0)
-    df["couverture_jours"] = df.apply(
-        lambda ligne: ligne["stock_actuel"] / ligne["conso_moyenne_jour"]
-        if ligne["conso_moyenne_jour"] > 0
-        else 9999,
-        axis=1
-    )
-
     # ============================================
-    # Étape 4 : niveau de risque
-    # Mode principal : ratio de stock (toujours disponible)
-    # Mode secondaire : couverture en jours (si conso disponible)
+    # Étape 4 : niveau de risque basé sur les jours restants
     # ============================================
     def determiner_niveau(ligne):
-        # Si on a des données de consommation, on utilise la couverture en jours
-        if ligne["conso_moyenne_jour"] > 0:
-            if ligne["couverture_jours"] < ligne["delai_moyen_jours"]:
-                return "🔴 Élevé"
-            elif ligne["couverture_jours"] < ligne["delai_moyen_jours"] * 1.5:
-                return "🟠 Moyen"
-            else:
-                return "🟢 Normal"
-        # Sinon, on utilise le ratio stock actuel / stock de sécurité
+        if ligne["couverture_jours"] < ligne["delai_moyen_jours"]:
+            return "🔴 Élevé"
+        elif ligne["couverture_jours"] < ligne["delai_moyen_jours"] * 1.5:
+            return "🟠 Moyen"
         else:
-            if ligne["ratio_stock"] < 0.5:
-                return "🔴 Élevé"
-            elif ligne["ratio_stock"] < 1.0:
-                return "🟠 Moyen"
-            else:
-                return "🟢 Normal"
+            return "🟢 Normal"
 
     df["niveau_risque"] = df.apply(determiner_niveau, axis=1)
 
@@ -98,33 +84,22 @@ def calculer_risque(matieres, consommation, fournisseurs):
     # ============================================
     def determiner_action(ligne):
         if ligne["niveau_risque"] == "🔴 Élevé":
-            return "Commander en urgence – stock inférieur à 50% du seuil de sécurité"
+            return f"Commander en urgence – stock estimé à {ligne['couverture_jours']:.0f} j, délai fournisseur {ligne['delai_moyen_jours']:.0f} j"
         elif ligne["niveau_risque"] == "🟠 Moyen":
-            return "Anticiper la commande – stock entre 50% et 100% du seuil de sécurité"
+            return f"Anticiper la commande – stock estimé à {ligne['couverture_jours']:.0f} j"
         else:
             return "Aucune action nécessaire"
 
     df["action_recommandee"] = df.apply(determiner_action, axis=1)
 
     # ============================================
-    # Étape 6 : quantité à commander
-    # Si conso disponible : formule du point de commande classique
-    # Sinon : quantité pour revenir au double du stock de sécurité
+    # Étape 6 : quantité à commander (point de commande classique)
     # ============================================
-    def calculer_quantite(ligne):
-        if ligne["conso_moyenne_jour"] > 0:
-            qte = (
-                ligne["conso_moyenne_jour"] * ligne["delai_moyen_jours"]
-                + ligne["stock_securite"]
-                - ligne["stock_actuel"]
-            )
-        else:
-            # On recommande de commander assez pour revenir
-            # à 2x le stock de sécurité (règle prudente)
-            qte = (2 * ligne["stock_securite"]) - ligne["stock_actuel"]
-        return max(0, qte)
-
-    df["quantite_a_commander"] = df.apply(calculer_quantite, axis=1)
+    df["quantite_a_commander"] = (
+        df["conso_moyenne_jour"] * df["delai_moyen_jours"]
+        + df["stock_securite"]
+        - df["stock_actuel"]
+    ).clip(lower=0)
 
     return df
 
@@ -137,7 +112,6 @@ def calculer_priorites(resultats_risque, besoins):
     """
     from datetime import date
 
-    # On fusionne chaque demande avec les infos de risque de sa matière
     df = besoins.merge(
         resultats_risque[[
             "code_matiere", "designation", "niveau_risque",
@@ -148,7 +122,6 @@ def calculer_priorites(resultats_risque, besoins):
         how="left",
     )
 
-    # ---- Points liés au risque de la matière ----
     def points_risque(niveau):
         if niveau == "🔴 Élevé":
             return 50
@@ -157,7 +130,6 @@ def calculer_priorites(resultats_risque, besoins):
         else:
             return 10
 
-    # ---- Points liés à la criticité production ----
     def points_criticite(criticite_texte):
         try:
             niveau_numerique = int(str(criticite_texte).split("(")[1].replace(")", ""))
@@ -168,9 +140,8 @@ def calculer_priorites(resultats_risque, besoins):
             else:
                 return 10
         except Exception:
-            return 10  # valeur par défaut si le format est inattendu
+            return 10
 
-    # ---- Points liés à l'urgence de la date de besoin ----
     def points_urgence_date(date_besoin):
         try:
             date_besoin = pd.to_datetime(date_besoin).date()
