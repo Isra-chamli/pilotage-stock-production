@@ -15,8 +15,7 @@ matieres = charger_excel("data/matieres.xlsx", "Matières")
 st.info(
     "⚠️ Aucun historique réel de consommation n'est disponible. "
     "L'estimation ci-dessous suppose que le stock de sécurité couvre un "
-    "nombre de jours fixe (paramétrable). Cette hypothèse peut être affinée "
-    "dès que des données de consommation réelles seront disponibles."
+    "nombre de jours fixe (paramétrable)."
 )
 
 delai_couverture = st.slider(
