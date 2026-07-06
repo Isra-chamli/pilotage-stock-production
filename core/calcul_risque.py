@@ -4,46 +4,45 @@ Adapté aux vraies données Maklada :
 - Pas de consommation historique disponible
   → consommation journalière ESTIMÉE à partir du stock de sécurité,
     en supposant qu'il couvre un nombre de jours donné (paramétrable)
-- Pas de liaison code_matiere dans le fichier fournisseurs
-  → délai moyen global calculé depuis l'historique des commandes
+- Liaison matiere -> fournisseur réel disponible dans
+  data/liaison_matiere_fournisseur.xlsx
+  → si une matière y est renseignée, on utilise son vrai fournisseur
+    et son vrai délai ; sinon on retombe sur le délai moyen global
 """
 
 import pandas as pd
 
 
-def calculer_risque(matieres, consommation, fournisseurs, delai_couverture_securite=15):
+def calculer_risque(matieres, consommation, fournisseurs, liaison=None, delai_couverture_securite=15):
     """
     Calcule le niveau de risque de rupture pour chaque matière.
+
+    liaison : DataFrame optionnel avec colonnes code_matiere, nom_fournisseur
+    permettant de lier chaque matière à son fournisseur réel.
+    Si absent ou non renseigné pour une matière, on retombe sur le
+    délai moyen global.
 
     delai_couverture_securite : hypothèse (en jours) sur le nombre de jours
     que le stock de sécurité est censé couvrir. Sert à estimer une
     consommation journalière en l'absence d'historique réel.
-
-    Évolution future (quand une vraie consommation sera disponible) :
-    - Remplir conso_moyenne_jour dans consommation.xlsx avec des valeurs > 0
-    - La fonction utilisera automatiquement ces vraies valeurs à la place
-      de l'estimation.
     """
 
     df = matieres.copy()
 
     # ============================================
     # Étape 1 : consommation moyenne journalière
-    # Priorité à une vraie consommation si elle existe et est renseignée,
-    # sinon on ESTIME à partir du stock de sécurité
     # ============================================
     if "conso_moyenne_jour" in df.columns and (df["conso_moyenne_jour"].fillna(0) > 0).any():
         df["conso_moyenne_jour"] = df["conso_moyenne_jour"].fillna(0)
         df["conso_est_estimee"] = df["conso_moyenne_jour"] == 0
     else:
-        # Estimation : le stock de sécurité couvre X jours de consommation
         df["conso_moyenne_jour"] = df["stock_securite"] / delai_couverture_securite
-        # Évite une division par zéro si stock_securite = 0
         df["conso_moyenne_jour"] = df["conso_moyenne_jour"].replace(0, 0.01)
         df["conso_est_estimee"] = True
 
     # ============================================
     # Étape 2 : délai fournisseur
+    # Priorité au fournisseur réel (via liaison), sinon délai global
     # ============================================
     if "delai_moyen_jours" in fournisseurs.columns and len(fournisseurs) > 0:
         delai_global = fournisseurs["delai_moyen_jours"].mean()
@@ -51,14 +50,40 @@ def calculer_risque(matieres, consommation, fournisseurs, delai_couverture_secur
         delai_global = 30
 
     df["delai_moyen_jours"] = delai_global
-    df["nom_fournisseur"] = "Voir fichier fournisseurs"
+    df["nom_fournisseur"] = "Non identifié (délai moyen global)"
+    df["fournisseur_identifie"] = False
+
+    if liaison is not None and len(liaison) > 0 and "nom_fournisseur" in liaison.columns:
+        liaison_valide = liaison.dropna(subset=["nom_fournisseur"]).copy()
+        liaison_valide["nom_fournisseur"] = liaison_valide["nom_fournisseur"].astype(str).str.strip()
+        liaison_valide = liaison_valide[liaison_valide["nom_fournisseur"] != ""]
+
+        if len(liaison_valide) > 0:
+            liaison_avec_delai = liaison_valide.merge(
+                fournisseurs[["nom_fournisseur", "delai_moyen_jours"]],
+                on="nom_fournisseur",
+                how="left",
+            )
+
+            df = df.merge(
+                liaison_avec_delai[["code_matiere", "nom_fournisseur", "delai_moyen_jours"]],
+                on="code_matiere",
+                how="left",
+                suffixes=("", "_reel"),
+            )
+
+            a_un_fournisseur = df["nom_fournisseur_reel"].notna()
+            df.loc[a_un_fournisseur, "nom_fournisseur"] = df.loc[a_un_fournisseur, "nom_fournisseur_reel"]
+            df.loc[a_un_fournisseur, "delai_moyen_jours"] = df.loc[a_un_fournisseur, "delai_moyen_jours_reel"]
+            df.loc[a_un_fournisseur, "fournisseur_identifie"] = True
+
+            df = df.drop(columns=["nom_fournisseur_reel", "delai_moyen_jours_reel"])
 
     # ============================================
     # Étape 3 : couverture en jours (= jours restants estimés)
     # ============================================
     df["couverture_jours"] = (df["stock_actuel"] / df["conso_moyenne_jour"]).round(1)
 
-    # Ratio stock conservé uniquement pour information / tri secondaire
     df["ratio_stock"] = df.apply(
         lambda ligne: ligne["stock_actuel"] / ligne["stock_securite"]
         if ligne["stock_securite"] > 0

@@ -25,6 +25,11 @@ try:
 except Exception:
     consommation = pd.DataFrame(columns=["code_matiere", "conso_moyenne_jour"])
 
+try:
+    liaison = charger_excel("data/liaison_matiere_fournisseur.xlsx", "Liaison matière-fournisseur")
+except Exception:
+    liaison = pd.DataFrame(columns=["code_matiere", "nom_fournisseur"])
+
 # ============================================
 # Hypothèse de couverture (car pas de conso réelle)
 # ============================================
@@ -32,6 +37,8 @@ st.info(
     "⚠️ Aucun historique réel de consommation n'est disponible. "
     "Le nombre de jours restants est **estimé** en supposant que le stock "
     "de sécurité couvre un nombre de jours fixe, réglable ci-dessous. "
+    "Dès qu'une vraie consommation sera renseignée dans `consommation.xlsx`, "
+    "le calcul basculera automatiquement sur des données réelles."
 )
 
 delai_couverture = st.slider(
@@ -40,7 +47,11 @@ delai_couverture = st.slider(
 )
 
 # Calcul du risque
-resultats = calculer_risque(matieres, consommation, fournisseurs, delai_couverture_securite=delai_couverture)
+resultats = calculer_risque(
+    matieres, consommation, fournisseurs,
+    liaison=liaison,
+    delai_couverture_securite=delai_couverture
+)
 
 # On ne garde que les matières à risque
 alertes = resultats[resultats["niveau_risque"] != "🟢 Normal"].copy()
@@ -100,10 +111,11 @@ else:
             with col2:
                 st.write(f"Stock actuel : {ligne['stock_actuel']:.0f}")
                 st.write(f"Jours restants estimés : **{ligne['couverture_jours']:.0f} j**")
-                st.write(f"Délai fournisseur moyen : {ligne['delai_moyen_jours']:.0f} j")
+                st.write(f"Fournisseur : **{ligne['nom_fournisseur']}**")
+                st.write(f"Délai fournisseur : {ligne['delai_moyen_jours']:.0f} j")
 
     st.divider()
     st.write("### Vue tableau complète")
-    colonnes_a_masquer = ["a_une_demande_active", "ratio_stock", "conso_est_estimee", "nom_fournisseur"]
+    colonnes_a_masquer = ["a_une_demande_active", "ratio_stock", "conso_est_estimee", "fournisseur_identifie"]
     colonnes_affichees = [c for c in alertes.columns if c not in colonnes_a_masquer]
     st.dataframe(alertes[colonnes_affichees])
