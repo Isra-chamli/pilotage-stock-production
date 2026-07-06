@@ -46,7 +46,7 @@ with st.form("formulaire_demande"):
         date_besoin = st.date_input("Date besoin", value=date.today())
         criticite = st.selectbox(
             "Criticité production",
-            options=["Basse (1)", "Normale (2)", "Moyenne (3)", "Haute (4)", "Haute (5)"],
+            options=["Basse (1)", "Normale (2)", "Moyenne (3)", "Haute (4)", "Très Haute (5)"],
         )
 
     commentaire = st.text_area("Commentaire (optionnel)")
