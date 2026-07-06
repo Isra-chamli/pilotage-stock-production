@@ -64,10 +64,6 @@ else:
 
     with col2:
         with st.container(border=True):
-            st.metric("⚠️ Stock le plus critique", f"{ratio_min*100:.0f}% du seuil")
-
-    with col3:
-        with st.container(border=True):
             st.metric("📦 Quantité totale à commander", f"{quantite_totale_a_commander:.0f}")
 
     st.divider()
