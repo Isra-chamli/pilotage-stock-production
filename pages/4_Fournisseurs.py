@@ -43,24 +43,35 @@ def calculer_score_fournisseur(groupe):
     return round(score, 0)
 
 # Vérifier si la colonne 'origine' existe, sinon la créer avec "local" par défaut
+# Vérifier si les colonnes existent, sinon les créer
 if "origine" not in historique.columns:
     historique["origine"] = "local"
-
-# Vérifier si la colonne 'Pays' existe, sinon la créer
 if "Pays" not in historique.columns:
     historique["Pays"] = "Tunisie"
 
+# On ajoute le délai standard AVANT le groupby
+historique["delai_standard"] = historique["origine"].map(DELAIS_STANDARDS).fillna(45)
+
 synthese = historique.groupby(
     ["nom_fournisseur", "Pays", "origine"]
-).apply(
-    lambda g: pd.Series({
-        "nb_commandes": len(g),
-        "delai_moyen_jours": round(g["delai_moyen_jours"].mean(), 0),
-        "delai_standard_jours": DELAIS_STANDARDS.get(g["origine"].iloc[0], 45),
-        "score_fiabilite": calculer_score_fournisseur(g),
-    })
+).agg(
+    nb_commandes=("nom_fournisseur", "count"),
+    delai_moyen_jours=("delai_moyen_jours", "mean"),
+    delai_standard_jours=("delai_standard", "first"),
 ).reset_index()
 
+# Calcul du score après le groupby
+synthese["delai_moyen_jours"] = synthese["delai_moyen_jours"].round(0)
+synthese["score_fiabilite"] = synthese.apply(
+    lambda row: round(
+        max(0, min(100,
+            (row["delai_standard_jours"] - row["delai_moyen_jours"])
+            / row["delai_standard_jours"] * 100
+        )),
+        0
+    ),
+    axis=1
+)
 def determiner_risque_fournisseur(score):
     if score >= 75:
         return "🟢 Fiable"
