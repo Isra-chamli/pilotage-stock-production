@@ -1,101 +1,83 @@
 import streamlit as st
 import pandas as pd
-from core.calcul_risque import calculer_risque
 from core.chargement_donnees import charger_excel
-from core.style import appliquer_style
 
-st.set_page_config(page_title="Matières", page_icon="📦", layout="wide")
+st.title("Estimation des jours restants de stock")
 
 # ============================================
-# Sidebar
-# ============================================
-st.sidebar.markdown("## 🏭 Pilotage Magasin")
-st.sidebar.markdown("---")
-appliquer_style()
-
-st.title("Matières📦")
-
 # Chargement des données
+# ============================================
 matieres = charger_excel("data/matieres.xlsx", "Matières")
-fournisseurs = charger_excel("data/fournisseurs.xlsx", "Fournisseurs")
-
-try:
-    consommation = charger_excel("data/consommation.xlsx", "Consommation")
-except Exception:
-    consommation = pd.DataFrame(columns=["code_matiere", "conso_moyenne_jour"])
-
-# Calcul du risque
-resultats = calculer_risque(matieres, consommation, fournisseurs)
 
 # ============================================
-# Filtre par type
+# Hypothèse de couverture du stock de sécurité
 # ============================================
-types_disponibles = ["Tous"] + resultats["type"].unique().tolist()
-type_choisi = st.selectbox("Filtrer par type :", types_disponibles)
+st.info(
+    "⚠️ Aucun historique réel de consommation n'est disponible. "
+    "L'estimation ci-dessous suppose que le stock de sécurité couvre un "
+    "nombre de jours fixe (paramétrable). Cette hypothèse peut être affinée "
+    "dès que des données de consommation réelles seront disponibles."
+)
 
-if type_choisi != "Tous":
-    resultats = resultats[resultats["type"] == type_choisi]
-
-# ============================================
-# KPIs de synthèse
-# ============================================
-nb_matieres = len(resultats)
-nb_sous_securite = len(resultats[resultats["stock_actuel"] < resultats["stock_securite"]])
-stock_total = resultats["stock_actuel"].sum()
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    with st.container(border=True):
-        st.metric("📦 Matières affichées", nb_matieres)
-
-with col2:
-    with st.container(border=True):
-        st.metric("⚠️ Sous le stock de sécurité", nb_sous_securite)
-
-with col3:
-    with st.container(border=True):
-        st.metric("📊 Stock total (toutes unités)", f"{stock_total:.0f}")
-
-st.divider()
+delai_couverture = st.slider(
+    "Délai de couverture supposé du stock de sécurité (jours)",
+    min_value=5, max_value=45, value=15, step=1,
+)
 
 # ============================================
-# Graphique : stock actuel vs stock de sécurité
+# Calcul de la consommation journalière estimée
 # ============================================
-st.subheader("Stock actuel vs stock de sécurité")
+matieres["conso_journaliere_estimee"] = (
+    matieres["stock_securite"] / delai_couverture
+)
 
-graphique_stock = resultats[["designation", "stock_actuel", "stock_securite"]].set_index("designation")
-graphique_stock.columns = ["Stock actuel", "Stock de sécurité"]
+# Éviter division par zéro si stock_securite = 0
+matieres["conso_journaliere_estimee"] = matieres["conso_journaliere_estimee"].replace(0, 0.01)
 
-st.bar_chart(graphique_stock, color=["#2F5496", "#E84545"])
-
-st.divider()
+matieres["jours_restants"] = (
+    matieres["stock_actuel"] / matieres["conso_journaliere_estimee"]
+).round(1)
 
 # ============================================
-# Tableau détaillé — colonnes utiles uniquement
+# Niveau d'alerte
 # ============================================
-colonnes_a_afficher = [
-    "code_matiere", "designation", "type",
-    "stock_actuel", "stock_securite", "ratio_stock",
-    "niveau_risque", "action_recommandee", "quantite_a_commander"
-]
+def determiner_alerte(jours):
+    if jours <= 3:
+        return "🔴 Critique"
+    elif jours <= 7:
+        return "🟠 À surveiller"
+    elif jours <= 15:
+        return "🟡 Correct"
+    else:
+        return "🟢 Confortable"
+
+matieres["alerte"] = matieres["jours_restants"].apply(determiner_alerte)
+matieres = matieres.sort_values("jours_restants")
+
+# ============================================
+# Affichage
+# ============================================
+st.write("### Estimation des jours de stock restants par matière")
 
 st.dataframe(
-    resultats[colonnes_a_afficher],
+    matieres,
     column_config={
         "code_matiere": "Code",
         "designation": "Désignation",
         "type": "Type",
-        "stock_actuel": st.column_config.NumberColumn("Stock actuel", format="%.0f"),
-        "stock_securite": st.column_config.NumberColumn("Stock sécurité", format="%.0f"),
-        "ratio_stock": st.column_config.ProgressColumn(
-            "Ratio stock", min_value=0, max_value=2, format="%.2f"
+        "stock_actuel": st.column_config.NumberColumn("Stock actuel"),
+        "stock_securite": st.column_config.NumberColumn("Stock sécurité"),
+        "conso_journaliere_estimee": st.column_config.NumberColumn(
+            "Conso/jour (estimée)", format="%.2f"
         ),
-        "niveau_risque": "Risque",
-        "action_recommandee": "Action recommandée",
-        "quantite_a_commander": st.column_config.NumberColumn(
-            "Qté à commander", format="%.0f"
+        "jours_restants": st.column_config.NumberColumn(
+            "Jours restants (estimé)", format="%.1f j"
         ),
+        "alerte": "Alerte",
     },
     hide_index=True,
 )
+
+nb_critiques = (matieres["jours_restants"] <= 3).sum()
+if nb_critiques > 0:
+    st.error(f"⚠️ {nb_critiques} matière(s) en rupture critique (≤ 3 jours estimés)")
