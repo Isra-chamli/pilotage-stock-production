@@ -42,6 +42,14 @@ def calculer_score_fournisseur(groupe):
     score = max(0, min(100, score))
     return round(score, 0)
 
+# Vérifier si la colonne 'origine' existe, sinon la créer avec "local" par défaut
+if "origine" not in historique.columns:
+    historique["origine"] = "local"
+
+# Vérifier si la colonne 'Pays' existe, sinon la créer
+if "Pays" not in historique.columns:
+    historique["Pays"] = "Tunisie"
+
 synthese = historique.groupby(
     ["nom_fournisseur", "Pays", "origine"]
 ).apply(
