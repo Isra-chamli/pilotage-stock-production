@@ -19,30 +19,12 @@ historique = charger_excel("data/historique_fournisseurs.xlsx", "Historique four
 
 # ============================================
 # Délais standards par origine
-# (basés sur les normes industrielles pour une usine tunisienne)
 # ============================================
 DELAIS_STANDARDS = {
-    "local": 30,      # fournisseur tunisien : délai acceptable = 30 jours
-    "étranger": 60,   # fournisseur européen : délai acceptable = 60 jours
+    "local": 30,
+    "étranger": 60,
 }
 
-def calculer_score_fournisseur(groupe):
-    """
-    Score basé sur la performance réelle vs délai standard attendu.
-    score = max(0, (delai_standard - delai_reel) / delai_standard * 100)
-    - Fournisseur livre avant le délai standard → score élevé
-    - Fournisseur livre exactement au délai standard → score moyen
-    - Fournisseur livre après le délai standard → score bas ou 0
-    """
-    origine = groupe["origine"].iloc[0]
-    delai_standard = DELAIS_STANDARDS.get(origine, 45)
-    delai_reel_moyen = groupe["delai_moyen_jours"].mean()
-
-    score = ((delai_standard - delai_reel_moyen) / delai_standard) * 100
-    score = max(0, min(100, score))
-    return round(score, 0)
-
-# Vérifier si la colonne 'origine' existe, sinon la créer avec "local" par défaut
 # Vérifier si les colonnes existent, sinon les créer
 if "origine" not in historique.columns:
     historique["origine"] = "local"
@@ -60,18 +42,28 @@ synthese = historique.groupby(
     delai_standard_jours=("delai_standard", "first"),
 ).reset_index()
 
-# Calcul du score après le groupby
 synthese["delai_moyen_jours"] = synthese["delai_moyen_jours"].round(0)
+
+# ============================================
+# Nouvelle formule correcte :
+# Si delai_reel <= delai_standard → score élevé (jusqu'à 100%)
+# Si delai_reel > delai_standard → score qui baisse progressivement
+# Exemple : 29j / standard 30j → 100% ✅
+#           36j / standard 30j → 80%  ✅
+#           74j / standard 60j → 77%  ✅
+#           197j / standard 60j → 0%  ✅
+# ============================================
 synthese["score_fiabilite"] = synthese.apply(
     lambda row: round(
         max(0, min(100,
-            (row["delai_standard_jours"] - row["delai_moyen_jours"])
+            100 - max(0, (row["delai_moyen_jours"] - row["delai_standard_jours"]))
             / row["delai_standard_jours"] * 100
         )),
         0
     ),
     axis=1
 )
+
 def determiner_risque_fournisseur(score):
     if score >= 75:
         return "🟢 Fiable"
@@ -86,7 +78,7 @@ synthese["risque"] = synthese["score_fiabilite"].apply(determiner_risque_fournis
 synthese = synthese.sort_values("score_fiabilite", ascending=False)
 
 st.write("### Synthèse par fournisseur")
-st.caption("Score basé sur le délai réel vs délai standard attendu (30j fournisseurs locaux / 60j fournisseurs étrangers). Score 100% = livraison bien avant le délai standard.")
+st.caption("Score de fiabilité : 100% si le fournisseur respecte le délai standard (30j locaux / 60j étrangers). Le score baisse proportionnellement au dépassement du délai.")
 
 st.dataframe(
     synthese,
