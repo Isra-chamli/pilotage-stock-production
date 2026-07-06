@@ -32,8 +32,6 @@ st.info(
     "⚠️ Aucun historique réel de consommation n'est disponible. "
     "Le nombre de jours restants est **estimé** en supposant que le stock "
     "de sécurité couvre un nombre de jours fixe, réglable ci-dessous. "
-    "Dès qu'une vraie consommation sera renseignée dans `consommation.xlsx`, "
-    "le calcul basculera automatiquement sur des données réelles."
 )
 
 delai_couverture = st.slider(
@@ -100,4 +98,12 @@ else:
                 st.write(f"Quantité à commander : **{ligne['quantite_a_commander']:.0f}**")
 
             with col2:
-                st.write(f"Stock actuel : {ligne
+                st.write(f"Stock actuel : {ligne['stock_actuel']:.0f}")
+                st.write(f"Jours restants estimés : **{ligne['couverture_jours']:.0f} j**")
+                st.write(f"Délai fournisseur moyen : {ligne['delai_moyen_jours']:.0f} j")
+
+    st.divider()
+    st.write("### Vue tableau complète")
+    colonnes_a_masquer = ["a_une_demande_active", "ratio_stock", "conso_est_estimee", "nom_fournisseur"]
+    colonnes_affichees = [c for c in alertes.columns if c not in colonnes_a_masquer]
+    st.dataframe(alertes[colonnes_affichees])
