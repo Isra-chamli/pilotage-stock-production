@@ -17,7 +17,7 @@ appliquer_style()
 # En-tête de l'application
 # ============================================
 st.title("🏭 Pilotage Intelligent du Magasin")
-st.caption("Réduction des arrêts de production liés aux ruptures de matières et consommables")
+st.caption("Réduction des arrêts de production liés aux ruptures de matières consommables")
 
 st.divider()
 
