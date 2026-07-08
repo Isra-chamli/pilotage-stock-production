@@ -5,6 +5,7 @@ from datetime import date
 from core.calcul_risque import calculer_risque
 from core.chargement_donnees import charger_excel
 from core.style import appliquer_style
+from core.email_alertes import envoyer_alerte_rupture
 
 st.set_page_config(page_title="Alertes", page_icon="🚨", layout="wide")
 
@@ -134,6 +135,35 @@ else:
         )
 
     st.divider()
+
+    # ============================================
+    # Envoi email d'alerte
+    # ============================================
+    st.write("### 📧 Envoyer le rapport par email")
+
+    col_email1, col_email2 = st.columns([2, 1])
+
+    with col_email1:
+        st.caption(
+            "Envoie un email de résumé des alertes au responsable magasin "
+            "et au directeur."
+        )
+
+    with col_email2:
+        if st.button("📧 Envoyer l'alerte par email", type="primary"):
+            with st.spinner("Envoi en cours..."):
+                colonnes_email = [
+                    "code_matiere", "designation", "niveau_risque",
+                    "stock_actuel", "stock_securite",
+                    "quantite_a_commander", "nom_fournisseur"
+                ]
+                colonnes_dispo = [c for c in colonnes_email if c in alertes.columns]
+                succes, message = envoyer_alerte_rupture(alertes[colonnes_dispo])
+
+            if succes:
+                st.success(f"✅ {message}")
+            else:
+                st.error(f"❌ {message}")
 
     st.warning(f"{len(alertes)} matière(s) nécessitent une attention.")
 
