@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import io
+from datetime import date
 from core.calcul_risque import calculer_risque
 from core.chargement_donnees import charger_excel
 from core.style import appliquer_style
@@ -67,8 +69,6 @@ def matiere_a_encore_une_demande_active(code_matiere):
 
 alertes["a_une_demande_active"] = alertes["code_matiere"].apply(matiere_a_encore_une_demande_active)
 alertes = alertes[alertes["a_une_demande_active"]]
-
-# Tri par jours restants (le plus critique en premier)
 alertes = alertes.sort_values("couverture_jours")
 
 if len(alertes) == 0:
@@ -97,6 +97,44 @@ else:
 
     st.divider()
 
+    # ============================================
+    # Export Excel et CSV
+    # ============================================
+    colonnes_a_masquer = [
+        "a_une_demande_active", "ratio_stock",
+        "conso_est_estimee", "fournisseur_identifie"
+    ]
+    colonnes_affichees = [c for c in alertes.columns if c not in colonnes_a_masquer]
+    alertes_export = alertes[colonnes_affichees].copy()
+
+    col_export1, col_export2 = st.columns(2)
+
+    with col_export1:
+        # Export Excel
+        buffer_excel = io.BytesIO()
+        with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:
+            alertes_export.to_excel(writer, index=False, sheet_name="Alertes")
+        buffer_excel.seek(0)
+
+        st.download_button(
+            label="📥 Télécharger le rapport Excel",
+            data=buffer_excel,
+            file_name=f"rapport_alertes_{date.today().strftime('%Y-%m-%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    with col_export2:
+        # Export CSV
+        csv = alertes_export.to_csv(index=False, sep=";", encoding="utf-8-sig")
+        st.download_button(
+            label="📥 Télécharger le rapport CSV",
+            data=csv,
+            file_name=f"rapport_alertes_{date.today().strftime('%Y-%m-%d')}.csv",
+            mime="text/csv",
+        )
+
+    st.divider()
+
     st.warning(f"{len(alertes)} matière(s) nécessitent une attention.")
 
     for _, ligne in alertes.iterrows():
@@ -116,6 +154,4 @@ else:
 
     st.divider()
     st.write("### Vue tableau complète")
-    colonnes_a_masquer = ["a_une_demande_active", "ratio_stock", "conso_est_estimee", "fournisseur_identifie"]
-    colonnes_affichees = [c for c in alertes.columns if c not in colonnes_a_masquer]
-    st.dataframe(alertes[colonnes_affichees])
+    st.dataframe(alertes_export)
