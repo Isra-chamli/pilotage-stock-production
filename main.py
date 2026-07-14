@@ -103,3 +103,14 @@ st.page_link("pages/3_Alertes.py", label="Voir toutes les alertes en détail", i
 
 st.divider()
 st.caption("Utilise le menu à gauche pour naviguer entre les différentes fonctionnalités de l'application.")
+
+
+st.markdown("### 📊 Dashboard Power BI")
+st.write("Consultez la version Power BI du pilotage de stock, avec vue Synthèse, Matières et Fournisseurs.")
+
+st.link_button(
+    "Ouvrir le dashboard Power BI",
+    "https://app.powerbi.com/links/AOQAiVtNHh?ctid=dbd6664d-4eb9-46eb-99d8-5c43ba153c61&pbi_source=linkShare"
+)
+
+
