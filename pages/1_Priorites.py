@@ -24,6 +24,15 @@ consommation = charger_excel("data/consommation.xlsx", "Consommation")
 fournisseurs = charger_excel("data/fournisseurs.xlsx", "Fournisseurs")
 besoins = charger_excel("data/besoins_production.xlsx", "Besoins de production")
 
+try:
+    liaison = charger_excel("data/liaison_matiere_fournisseur.xlsx", "Liaison matière-fournisseur")
+except Exception:
+    liaison = pd.DataFrame(columns=["code_matiere", "nom_fournisseur"])
+
+# Hypothèse de repli identique à celle de la page Alertes : utilisée
+# uniquement quand aucune consommation réelle n'existe pour une matière.
+delai_couverture = 15
+
 # On uniformise le format de la date
 besoins["date_besoin"] = pd.to_datetime(besoins["date_besoin"]).dt.strftime("%Y-%m-%d")
 
@@ -48,7 +57,14 @@ def faire_progresser_statut(index_ligne):
 # ============================================
 # Calculs
 # ============================================
-resultats_risque = calculer_risque(matieres, consommation, fournisseurs)
+# On passe liaison et delai_couverture_securite pour rester cohérent
+# avec le calcul fait sur la page Alertes (même fournisseur résolu,
+# même hypothèse de repli en cas d'absence de consommation réelle).
+resultats_risque = calculer_risque(
+    matieres, consommation, fournisseurs,
+    liaison=liaison,
+    delai_couverture_securite=delai_couverture
+)
 
 if len(besoins) == 0:
     st.info("Aucune demande de production enregistrée pour le moment.")
