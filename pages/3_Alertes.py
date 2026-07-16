@@ -67,8 +67,12 @@ resultats = calculer_risque(
     delai_couverture_securite=delai_couverture
 )
 
-# On ne garde que les matières à risque (ou dont le risque est inconnu)
-alertes = resultats[resultats["niveau_risque"] != "🟢 Normal"].copy()
+# On ne garde que les matières à risque avéré (Élevé / Moyen).
+# Les matières en "⚪ Donnée manquante" ne sont PAS affichées ici : leur
+# risque réel est inconnu, on ne peut pas les classer comme urgentes.
+# Elles restent visibles sur la page Estimation / la page d'accueil, où
+# c'est signalé qu'il faut compléter leurs données.
+alertes = resultats[resultats["niveau_risque"].isin(["🔴 Élevé", "🟠 Moyen"])].copy()
 
 # ============================================
 # On retire les matières dont TOUTES les demandes sont traitées
@@ -90,11 +94,10 @@ else:
     # KPIs de synthèse
     # ============================================
     nb_alertes = len(alertes)
-    nb_donnee_manquante = len(alertes[alertes["niveau_risque"] == "⚪ Donnée manquante"])
     jours_min = alertes["couverture_jours"].min()
     quantite_totale_a_commander = alertes["quantite_a_commander"].sum()
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         with st.container(border=True):
@@ -102,13 +105,9 @@ else:
 
     with col2:
         with st.container(border=True):
-            st.metric("⚪ Dont données manquantes", nb_donnee_manquante)
-
-    with col3:
-        with st.container(border=True):
             st.metric("⏳ Jours restants (min.)", fmt(jours_min, " j"))
 
-    with col4:
+    with col3:
         with st.container(border=True):
             st.metric("📦 Quantité totale à commander", fmt(quantite_totale_a_commander))
 
