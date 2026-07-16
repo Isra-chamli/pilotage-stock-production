@@ -20,7 +20,7 @@ APP_PASSWORD = st.secrets["email"]["smtp_password"]
 # Destinataires — à modifier avec les vrais emails
 DESTINATAIRES = [
     "chamliisra622@gmail.com",   # à remplacer
-    "directeur@maklada.com",              # à remplacer
+    "wezzine@maklada.com",              # à remplacer
 ]
 
 
