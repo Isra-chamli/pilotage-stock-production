@@ -18,6 +18,16 @@ appliquer_style()
 
 st.title("Alertes de rupture🚨")
 
+
+def fmt(valeur, suffixe=""):
+    """Affiche un nombre proprement, ou 'N/D' si la donnée est manquante
+    (évite d'afficher 'nan' à l'écran pour les matières sans historique
+    de consommation / stock de sécurité connu)."""
+    if pd.isna(valeur):
+        return "N/D"
+    return f"{valeur:.0f}{suffixe}"
+
+
 # Chargement des données
 matieres = charger_excel("data/matieres.xlsx", "Matières")
 fournisseurs = charger_excel("data/fournisseurs.xlsx", "Fournisseurs")
@@ -34,18 +44,19 @@ except Exception:
     liaison = pd.DataFrame(columns=["code_matiere", "nom_fournisseur"])
 
 # ============================================
-# Hypothèse de couverture (car pas de conso réelle)
+# Hypothèse de couverture (utilisée seulement en repli, quand aucune
+# consommation réelle n'est disponible pour une matière)
 # ============================================
 st.info(
-    "⚠️ Aucun historique réel de consommation n'est disponible. "
-    "Le nombre de jours restants est **estimé** en supposant que le stock "
-    "de sécurité couvre un nombre de jours fixe, réglable ci-dessous. "
-    "Dès qu'une vraie consommation sera renseignée dans `consommation.xlsx`, "
-    "le calcul basculera automatiquement sur des données réelles."
+    "ℹ️ Le nombre de jours restants utilise en priorité la **consommation réelle** "
+    "calculée à partir de l'historique de commandes (`consommation.xlsx`). Quand elle "
+    "n'existe pas pour une matière, une **estimation** basée sur le stock de sécurité "
+    "est utilisée à la place, avec l'hypothèse réglable ci-dessous. Quand ni l'une ni "
+    "l'autre n'est disponible, la matière apparaît en **⚪ Donnée manquante**."
 )
 
 delai_couverture = st.slider(
-    "Délai de couverture supposé du stock de sécurité (jours)",
+    "Délai de couverture supposé du stock de sécurité (jours), utilisé en repli",
     min_value=5, max_value=45, value=15, step=1,
 )
 
@@ -56,7 +67,7 @@ resultats = calculer_risque(
     delai_couverture_securite=delai_couverture
 )
 
-# On ne garde que les matières à risque
+# On ne garde que les matières à risque (ou dont le risque est inconnu)
 alertes = resultats[resultats["niveau_risque"] != "🟢 Normal"].copy()
 
 # ============================================
@@ -70,7 +81,7 @@ def matiere_a_encore_une_demande_active(code_matiere):
 
 alertes["a_une_demande_active"] = alertes["code_matiere"].apply(matiere_a_encore_une_demande_active)
 alertes = alertes[alertes["a_une_demande_active"]]
-alertes = alertes.sort_values("couverture_jours")
+alertes = alertes.sort_values("couverture_jours", na_position="last")
 
 if len(alertes) == 0:
     st.success("Aucune alerte actuelle. Toutes les matières sont à un niveau normal, ou leurs demandes ont déjà été traitées.")
@@ -79,10 +90,11 @@ else:
     # KPIs de synthèse
     # ============================================
     nb_alertes = len(alertes)
+    nb_donnee_manquante = len(alertes[alertes["niveau_risque"] == "⚪ Donnée manquante"])
     jours_min = alertes["couverture_jours"].min()
     quantite_totale_a_commander = alertes["quantite_a_commander"].sum()
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         with st.container(border=True):
@@ -90,11 +102,15 @@ else:
 
     with col2:
         with st.container(border=True):
-            st.metric("⏳ Jours restants (min.)", f"{jours_min:.0f} j")
+            st.metric("⚪ Dont données manquantes", nb_donnee_manquante)
 
     with col3:
         with st.container(border=True):
-            st.metric("📦 Quantité totale à commander", f"{quantite_totale_a_commander:.0f}")
+            st.metric("⏳ Jours restants (min.)", fmt(jours_min, " j"))
+
+    with col4:
+        with st.container(border=True):
+            st.metric("📦 Quantité totale à commander", fmt(quantite_totale_a_commander))
 
     st.divider()
 
@@ -103,7 +119,7 @@ else:
     # ============================================
     colonnes_a_masquer = [
         "a_une_demande_active", "ratio_stock",
-        "conso_est_estimee", "fournisseur_identifie"
+        "conso_source", "donnee_insuffisante", "fournisseur_identifie", "delai_fiable"
     ]
     colonnes_affichees = [c for c in alertes.columns if c not in colonnes_a_masquer]
     alertes_export = alertes[colonnes_affichees].copy()
@@ -174,13 +190,16 @@ else:
             with col1:
                 st.markdown(f"**{ligne['niveau_risque']} — {ligne['designation']}** ({ligne['code_matiere']})")
                 st.write(f"Action recommandée : {ligne['action_recommandee']}")
-                st.write(f"Quantité à commander : **{ligne['quantite_a_commander']:.0f}**")
+                st.write(f"Quantité à commander : **{fmt(ligne['quantite_a_commander'])}**")
 
             with col2:
-                st.write(f"Stock actuel : {ligne['stock_actuel']:.0f}")
-                st.write(f"Jours restants estimés : **{ligne['couverture_jours']:.0f} j**")
+                st.write(f"Stock actuel : {fmt(ligne['stock_actuel'])}")
+                st.write(f"Jours restants estimés : **{fmt(ligne['couverture_jours'], ' j')}**")
                 st.write(f"Fournisseur : **{ligne['nom_fournisseur']}**")
-                st.write(f"Délai fournisseur : {ligne['delai_moyen_jours']:.0f} j")
+                delai_txt = fmt(ligne['delai_moyen_jours'], ' j')
+                if not ligne.get("delai_fiable", True):
+                    delai_txt += " ⚠️ (délai non vérifiable pour ce fournisseur)"
+                st.write(f"Délai fournisseur : {delai_txt}")
 
     st.divider()
     st.write("### Vue tableau complète")
