@@ -13,15 +13,11 @@ matieres = charger_excel("data/matieres.xlsx", "Matières")
 # ============================================
 # Hypothèse de couverture du stock de sécurité
 # ============================================
-st.info(
-    "⚠️ Aucun historique réel de consommation n'est disponible. "
-    "L'estimation ci-dessous suppose que le stock de sécurité couvre un "
-    "nombre de jours fixe (paramétrable)."
-)
+delai_couverture = 15  # jours de couverture supposés du stock de sécurité
 
-delai_couverture = st.slider(
-    "Délai de couverture supposé du stock de sécurité (jours)",
-    min_value=5, max_value=45, value=15, step=1,
+st.info(
+    "⚠️ Aucun historique réel de consommation n'est disponible pour cette estimation. "
+    f"Elle suppose que le stock de sécurité couvre {delai_couverture} jours."
 )
 
 # ============================================
