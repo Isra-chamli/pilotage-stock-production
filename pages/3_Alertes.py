@@ -51,14 +51,13 @@ st.info(
     "ℹ️ Le nombre de jours restants utilise en priorité la **consommation réelle** "
     "calculée à partir de l'historique de commandes (`consommation.xlsx`). Quand elle "
     "n'existe pas pour une matière, une **estimation** basée sur le stock de sécurité "
-    "est utilisée à la place, avec l'hypothèse réglable ci-dessous. Quand ni l'une ni "
-    "l'autre n'est disponible, la matière apparaît en **⚪ Donnée manquante**."
+    "est utilisée à la place, avec l'hypothèse réglable ci-dessous."
 )
 
-delai_couverture = st.slider(
-    "Délai de couverture supposé du stock de sécurité (jours), utilisé en repli",
-    min_value=5, max_value=45, value=15, step=1,
-)
+delai_couverture = 15  # hypothèse fixe : stock de sécurité supposé couvrir 15 jours,
+# utilisée uniquement en repli quand aucune consommation réelle n'existe pour la matière.
+# À ajuster ici directement si besoin, une fois qu'on aura plus de recul sur la
+# vraie consommation moyenne.
 
 # Calcul du risque
 resultats = calculer_risque(
@@ -66,6 +65,14 @@ resultats = calculer_risque(
     liaison=liaison,
     delai_couverture_securite=delai_couverture
 )
+
+nb_sans_donnee = len(resultats[resultats["niveau_risque"] == "⚪ Donnée manquante"])
+if nb_sans_donnee > 0:
+    st.warning(
+        f"⚪ {nb_sans_donnee} matière(s) n'ont ni consommation réelle ni stock de sécurité "
+        f"renseigné : leur risque n'est pas calculable et elles n'apparaissent pas ci-dessous. "
+        f"Complétez `matieres.xlsx` pour les inclure."
+    )
 
 # On ne garde que les matières à risque avéré (Élevé / Moyen).
 # Les matières en "⚪ Donnée manquante" ne sont PAS affichées ici : leur
