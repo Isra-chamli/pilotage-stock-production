@@ -30,7 +30,12 @@ try:
 except Exception:
     consommation = pd.DataFrame(columns=["code_matiere", "conso_moyenne_jour"])
 
-resultats = calculer_risque(matieres, consommation, fournisseurs)
+try:
+    liaison = charger_excel("data/liaison_matiere_fournisseur.xlsx", "Liaison matière-fournisseur")
+except Exception:
+    liaison = pd.DataFrame(columns=["code_matiere", "nom_fournisseur"])
+
+resultats = calculer_risque(matieres, consommation, fournisseurs, liaison=liaison)
 
 nb_total = len(resultats)
 nb_risque_eleve = len(resultats[resultats["niveau_risque"] == "🔴 Élevé"])
@@ -39,6 +44,7 @@ nb_normal = len(resultats[resultats["niveau_risque"] == "🟢 Normal"])
 
 # ============================================
 # Indicateurs clés, dans des cartes avec bordure
+# (la catégorie "Donnée manquante" n'est volontairement pas affichée ici)
 # ============================================
 col1, col2, col3, col4 = st.columns(4)
 
@@ -72,6 +78,8 @@ st.link_button(
 
 # ============================================
 # Graphique : répartition des matières par niveau de risque
+# (on ne garde que Élevé / Moyen / Normal dans le graphique, la
+# catégorie "Donnée manquante" n'y apparaît pas)
 # ============================================
 st.subheader("Répartition des matières par niveau de risque")
 
@@ -79,6 +87,7 @@ repartition = resultats["niveau_risque"].value_counts().reset_index()
 repartition.columns = ["niveau_risque", "nombre"]
 
 ordre_risque = ["🔴 Élevé", "🟠 Moyen", "🟢 Normal"]
+repartition = repartition[repartition["niveau_risque"].isin(ordre_risque)]
 repartition["niveau_risque"] = pd.Categorical(
     repartition["niveau_risque"], categories=ordre_risque, ordered=True
 )
@@ -103,9 +112,13 @@ if len(alertes_urgentes) == 0:
 else:
     for _, ligne in alertes_urgentes.head(3).iterrows():
         ratio = ligne["ratio_stock"]
+        if pd.notna(ratio):
+            texte_ratio = f"stock à {ratio*100:.0f}% du seuil de sécurité "
+        else:
+            texte_ratio = ""
         st.warning(
             f"**{ligne['designation']}** ({ligne['code_matiere']}) — "
-            f"stock à {ratio*100:.0f}% du seuil de sécurité "
+            f"{texte_ratio}"
             f"(stock actuel : {ligne['stock_actuel']:.0f} / seuil : {ligne['stock_securite']:.0f})"
         )
 
@@ -113,8 +126,3 @@ st.page_link("pages/3_Alertes.py", label="Voir toutes les alertes en détail", i
 
 st.divider()
 st.caption("Utilise le menu à gauche pour naviguer entre les différentes fonctionnalités de l'application.")
-
-
-
-
-
