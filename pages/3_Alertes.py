@@ -6,6 +6,9 @@ from core.calcul_risque import calculer_risque
 from core.chargement_donnees import charger_excel
 from core.style import appliquer_style
 from core.email_alertes import envoyer_alerte_rupture
+from core.suivi_commandes import (
+    charger_suivi, creer_commande, avancer_statut, statut_actif, est_traitee
+)
 
 st.set_page_config(page_title="Alertes", page_icon="🚨", layout="wide")
 
@@ -32,6 +35,7 @@ def fmt(valeur, suffixe=""):
 matieres = charger_excel("data/matieres.xlsx", "Matières")
 fournisseurs = charger_excel("data/fournisseurs.xlsx", "Fournisseurs")
 besoins = charger_excel("data/besoins_production.xlsx", "Besoins de production")
+suivi = charger_suivi()
 
 try:
     consommation = charger_excel("data/consommation.xlsx", "Consommation")
@@ -51,7 +55,7 @@ st.info(
     "ℹ️ Le nombre de jours restants utilise en priorité la **consommation réelle** "
     "calculée à partir de l'historique de commandes (`consommation.xlsx`). Quand elle "
     "n'existe pas pour une matière, une **estimation** basée sur le stock de sécurité "
-    "est utilisée à la place, avec l'hypothèse réglable ci-dessous."
+    "est utilisée à la place."
 )
 
 delai_couverture = 15  # hypothèse fixe : stock de sécurité supposé couvrir 15 jours,
@@ -82,6 +86,14 @@ if nb_sans_donnee > 0:
 alertes = resultats[resultats["niveau_risque"].isin(["🔴 Élevé", "🟠 Moyen"])].copy()
 
 # ============================================
+# On retire les matières déjà marquées "Livré" : une fois la commande
+# reçue, la matière quitte la page Alertes et rejoint l'Historique des
+# commandes, même si le risque calculé est encore élevé (le stock
+# physique dans matieres.xlsx n'a peut-être pas encore été remis à jour).
+# ============================================
+alertes = alertes[~alertes["code_matiere"].apply(lambda c: est_traitee(suivi, c))]
+
+# ============================================
 # On retire les matières dont TOUTES les demandes sont traitées
 # ============================================
 def matiere_a_encore_une_demande_active(code_matiere):
@@ -95,7 +107,7 @@ alertes = alertes[alertes["a_une_demande_active"]]
 alertes = alertes.sort_values("couverture_jours", na_position="last")
 
 if len(alertes) == 0:
-    st.success("Aucune alerte actuelle. Toutes les matières sont à un niveau normal, ou leurs demandes ont déjà été traitées.")
+    st.success("Aucune alerte actuelle. Toutes les matières sont à un niveau normal, leur commande est déjà en cours de traitement, ou leurs demandes ont déjà été traitées.")
 else:
     # ============================================
     # KPIs de synthèse
@@ -190,11 +202,14 @@ else:
     st.warning(f"{len(alertes)} matière(s) nécessitent une attention.")
 
     for _, ligne in alertes.iterrows():
+        code = ligne["code_matiere"]
+        statut_courant = statut_actif(suivi, code)
+
         with st.container(border=True):
-            col1, col2 = st.columns([2, 1])
+            col1, col2, col3 = st.columns([2, 1, 1])
 
             with col1:
-                st.markdown(f"**{ligne['niveau_risque']} — {ligne['designation']}** ({ligne['code_matiere']})")
+                st.markdown(f"**{ligne['niveau_risque']} — {ligne['designation']}** ({code})")
                 st.write(f"Action recommandée : {ligne['action_recommandee']}")
                 st.write(f"Quantité à commander : **{fmt(ligne['quantite_a_commander'])}**")
 
@@ -206,6 +221,30 @@ else:
                 if not ligne.get("delai_fiable", True):
                     delai_txt += " ⚠️ (délai non vérifiable pour ce fournisseur)"
                 st.write(f"Délai fournisseur : {delai_txt}")
+
+            with col3:
+                st.write("**Suivi de la commande**")
+
+                if statut_courant is None:
+                    if st.button("🛒 Commander", key=f"commander_{code}"):
+                        suivi = creer_commande(
+                            suivi, code, ligne["designation"],
+                            ligne["quantite_a_commander"], ligne["nom_fournisseur"]
+                        )
+                        st.rerun()
+
+                elif statut_courant == "Commandé":
+                    st.markdown("🛒 **Commandé**")
+                    if st.button("🚚 Marquer en cours de livraison", key=f"livraison_{code}"):
+                        suivi = avancer_statut(suivi, code)
+                        st.rerun()
+
+                elif statut_courant == "En cours de livraison":
+                    st.markdown("🚚 **En cours de livraison**")
+                    if st.button("✅ Marquer comme livré", key=f"livre_{code}"):
+                        suivi = avancer_statut(suivi, code)
+                        st.success("Livraison enregistrée — déplacée vers l'Historique des commandes.")
+                        st.rerun()
 
     st.divider()
     st.write("### Vue tableau complète")
