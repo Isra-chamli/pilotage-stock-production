@@ -42,8 +42,21 @@ def charger_suivi():
         for colonne in COLONNES:
             if colonne not in df.columns:
                 df[colonne] = pd.NA
-        return df[COLONNES]
-    return pd.DataFrame(columns=COLONNES)
+        df = df[COLONNES]
+    else:
+        df = pd.DataFrame(columns=COLONNES)
+
+    # Les colonnes de date peuvent être rechargées par pandas en dtype
+    # float64 quand elles ne contiennent que des NaN (aucune commande
+    # livrée pour l'instant, par exemple). Les pandas récents (2.x/3.x)
+    # refusent alors d'y écrire une chaîne de caractères avec .loc et
+    # lèvent un TypeError. On force ces colonnes en dtype "object" pour
+    # pouvoir toujours y stocker une date au format texte.
+    colonnes_dates = ["date_creation", "date_commande", "date_debut_livraison", "date_livraison"]
+    for colonne in colonnes_dates:
+        df[colonne] = df[colonne].astype("object")
+
+    return df
 
 
 def sauvegarder_suivi(suivi):
@@ -108,6 +121,13 @@ def avancer_statut(suivi, code_matiere):
         return suivi
 
     statut_actuel = suivi.loc[index, "statut"]
+
+    # Sécurité supplémentaire : on force le dtype "object" juste avant
+    # d'écrire, au cas où le DataFrame recevrait la colonne dans un état
+    # numérique (toutes les valeurs encore NaN) d'une façon qu'on
+    # n'aurait pas anticipée dans charger_suivi().
+    suivi["date_debut_livraison"] = suivi["date_debut_livraison"].astype("object")
+    suivi["date_livraison"] = suivi["date_livraison"].astype("object")
 
     if statut_actuel == "Commandé":
         suivi.loc[index, "statut"] = "En cours de livraison"
